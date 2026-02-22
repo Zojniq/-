@@ -183,7 +183,21 @@ async def homework_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def homework_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    subject = query.data
+    data = query.data
+
+    if data.startswith("sched:"):
+        mode = data.split(":", 1)[1]
+        fake_update = Update(update.update_id, message=query.message)
+        if mode == "today":
+            await today_command(fake_update, context)
+        elif mode == "tomorrow":
+            await tomorrow_command(fake_update, context)
+        elif mode == "week":
+            await week_command(fake_update, context)
+        return
+
+    # якщо не sched:, значить це предмет для ДЗ
+    subject = data
     context.user_data["selected_subject"] = subject
     await query.edit_message_text(f"Введіть ДЗ для предмета: {subject}")
 
@@ -208,6 +222,21 @@ async def list_homework(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text = "📋 Ваші ДЗ:\n" + "\n".join([f"📌 {subject}: {hw}" for subject, hw in HOMEWORK.items()])
     await update.message.reply_text(text)
+
+
+async def schedule_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    keyboard = [
+        [
+            InlineKeyboardButton("📅 Сьогодні", callback_data="sched:today"),
+            InlineKeyboardButton("📆 Завтра", callback_data="sched:tomorrow"),
+        ],
+        [InlineKeyboardButton("🗓 Тиждень", callback_data="sched:week")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Обери, який розклад показати:",
+        reply_markup=reply_markup,
+    )
 
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
