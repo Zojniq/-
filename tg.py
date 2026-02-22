@@ -196,7 +196,16 @@ async def homework_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await week_command(fake_update, context)
         return
 
-    # якщо не sched:, значить це предмет для ДЗ
+    if data.startswith("remind:"):
+        global REMINDER_INTERVAL, MY_CHAT_ID
+        minutes = int(data.split(":", 1)[1])
+        REMINDER_INTERVAL = minutes
+        await query.edit_message_text(f"✅ Інтервал нагадувань змінено на {REMINDER_INTERVAL} хв.")
+        if MY_CHAT_ID is not None:
+            remove_jobs_for_chat(context.application, MY_CHAT_ID)
+            schedule_jobs_for_chat(context.application, MY_CHAT_ID)
+        return
+
     subject = data
     context.user_data["selected_subject"] = subject
     await query.edit_message_text(f"Введіть ДЗ для предмета: {subject}")
@@ -302,7 +311,17 @@ async def main_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     elif text == "📅 Розклад":
         await schedule_menu(update, context)
     elif text == "⚙️ Нагадування":
-        await update.message.reply_text("Використовуй команду: /remind 5")
+        keyboard = [
+            [
+                InlineKeyboardButton("5 хв", callback_data="remind:5"),
+                InlineKeyboardButton("10 хв", callback_data="remind:10"),
+                InlineKeyboardButton("15 хв", callback_data="remind:15"),
+            ]
+        ]
+        await update.message.reply_text(
+            "Оберіть за скільки хвилин до пари нагадувати:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
     else:
         await save_homework_command(update, context)
 
@@ -322,7 +341,8 @@ def main() -> None:
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("tomorrow", tomorrow_command))
     app.add_handler(CommandHandler("week", week_command))
-    app.add_handler(CommandHandler("remind", remind_command))
+    # Remove the remind command handler if no longer needed
+    # app.add_handler(CommandHandler("remind", remind_command))
     app.add_handler(CallbackQueryHandler(homework_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_router))
 
