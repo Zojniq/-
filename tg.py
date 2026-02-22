@@ -16,6 +16,8 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 from schedule import SCHEDULE, WEEKDAY_TO_INDEX, get_lessons_for_day
@@ -24,7 +26,7 @@ from homework import HOMEWORK, load_homework, save_homework
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("❌ Змінна середовища BOT_TOKEN не встановлена. Будь ласка, додайте її до вашого середовища.")
+    raise ValueError("❌ Змінна середовища BOT_TOKEN не встановлена. Додай її в env.")
 
 MY_CHAT_ID = None
 
@@ -35,6 +37,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 REMINDER_INTERVAL = 15
+
+
+MAIN_MENU_BUTTONS = [
+    ["▶️ Старт", "⏹ Стоп"],
+    ["📚 ДЗ", "📝 Список ДЗ"],
+    ["📅 Розклад", "⚙️ Нагадування"],
+]
+
+
+def build_main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(text) for text in row] for row in MAIN_MENU_BUTTONS],
+        resize_keyboard=True,
+    )
 
 
 def parse_time_str(t: str) -> time:
@@ -48,10 +64,7 @@ def validate_schedule(schedule: list) -> None:
             raise ValueError(f"Некоректний запис у розкладі: {lesson}")
         if lesson["weekday"] not in WEEKDAY_TO_INDEX:
             raise ValueError(f"Некоректний день тижня: {lesson['weekday']}")
-        try:
-            parse_time_str(lesson["time"])
-        except ValueError:
-            raise ValueError(f"Некоректний час: {lesson['time']}")
+        parse_time_str(lesson["time"])
 
 
 async def reminder_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -59,22 +72,26 @@ async def reminder_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = data["chat_id"]
     subject = data["subject"]
     room = data["room"]
-
     text = f"Час йти в універ! Через {REMINDER_INTERVAL} хв починається {subject} в кабінеті {room}."
     await context.bot.send_message(chat_id=chat_id, text=text)
 
 
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global REMINDER_INTERVAL
+    global REMINDER_INTERVAL, MY_CHAT_ID
 
     try:
         new_interval = int(context.args[0])
         if new_interval <= 0:
             raise ValueError
         REMINDER_INTERVAL = new_interval
-        await update.message.reply_text(f"✅ Інтервал нагадувань змінено на {REMINDER_INTERVAL} хвилин.")
+        await update.message.reply_text(
+            f"✅ Інтервал нагадувань змінено на {REMINDER_INTERVAL} хвилин. Переплановую нагадування…"
+        )
+        if MY_CHAT_ID is not None:
+            remove_jobs_for_chat(context.application, MY_CHAT_ID)
+            schedule_jobs_for_chat(context.application, MY_CHAT_ID)
     except (IndexError, ValueError):
-        await update.message.reply_text("❌ Вкажіть коректний інтервал у хвилинах. Наприклад: /remind 10")
+        await update.message.reply_text("❌ Формат: /remind 5 (хвилин)")
 
 
 def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
@@ -82,15 +99,11 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
 
     for i, lesson in enumerate(SCHEDULE):
         weekday_name = lesson["weekday"]
-        lesson_time_str = lesson["time"]
-        subject = lesson["subject"]
-        room = lesson["room"]
-
         if weekday_name not in WEEKDAY_TO_INDEX:
             continue
 
         weekday_index = WEEKDAY_TO_INDEX[weekday_name]
-        lesson_time = parse_time_str(lesson_time_str)
+        lesson_time = parse_time_str(lesson["time"])
 
         dt_dummy = datetime.combine(datetime.today(), lesson_time) - timedelta(minutes=REMINDER_INTERVAL)
         reminder_time = time(hour=dt_dummy.hour, minute=dt_dummy.minute)
@@ -101,20 +114,14 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
             callback=reminder_callback,
             time=reminder_time,
             days=(weekday_index,),
-            data={
-                "chat_id": chat_id,
-                "subject": subject,
-                "room": room,
-            },
+            data={"chat_id": chat_id, "subject": lesson["subject"], "room": lesson["room"]},
             name=job_name,
         )
 
 
 def remove_jobs_for_chat(application: Application, chat_id: int) -> None:
     job_queue = application.job_queue
-    current_jobs = job_queue.jobs()
-
-    for job in current_jobs:
+    for job in job_queue.jobs():
         if job.name and job.name.startswith(f"reminder_{chat_id}_"):
             job.schedule_removal()
 
@@ -126,30 +133,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if MY_CHAT_ID is None:
         MY_CHAT_ID = chat_id
 
-    keyboard = [
-        [KeyboardButton("🚀 /start"), KeyboardButton("🛑 /stop")],
-        [KeyboardButton("📚 /homework"), KeyboardButton("📝 /listhw")],
-        [KeyboardButton("🔙 /menu")],
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-    await update.message.reply_text(
-        f"👋 Привіт! Я буду надсилати нагадування за {REMINDER_INTERVAL} хвилин до початку пар.\n\n"
-        "📅 Використовуйте кнопки нижче для керування ботом.",
-        reply_markup=reply_markup,
-    )
-
     try:
         validate_schedule(SCHEDULE)
     except ValueError as e:
         logger.error(f"Помилка в розкладі: {e}")
-        await update.message.reply_text("Помилка в розкладі. Зверніться до адміністратора.")
+        await update.message.reply_text("❌ Помилка в розкладі. Поправ код.")
         return
 
     remove_jobs_for_chat(context.application, MY_CHAT_ID)
     schedule_jobs_for_chat(context.application, MY_CHAT_ID)
 
-    await update.message.reply_text("Розклад нагадувань налаштовано!")
+    await update.message.reply_text(
+        f"👋 Привіт! Нагадуватиму за {REMINDER_INTERVAL} хв до початку пар.\n"
+        "Використовуй меню нижче.",
+        reply_markup=build_main_keyboard(),
+    )
+    await update.message.reply_text("✅ Розклад нагадувань налаштовано!")
     logger.info(f"Розклад налаштовано для chat_id={MY_CHAT_ID}")
 
 
@@ -157,41 +156,56 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     global MY_CHAT_ID
 
     chat_id = update.effective_chat.id
-
     if MY_CHAT_ID is not None and chat_id != MY_CHAT_ID:
         await update.message.reply_text("У тебе немає активних нагадувань або ти не головний користувач бота.")
         return
 
     remove_jobs_for_chat(context.application, chat_id)
-    await update.message.reply_text("✅ Всі нагадування скасовано. До зустрічі! 👋")
+    await update.message.reply_text("✅ Всі нагадування скасовано.", reply_markup=build_main_keyboard())
     logger.info(f"Нагадування скасовано для chat_id={chat_id}")
 
 
 async def homework_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     subjects = sorted({lesson["subject"] for lesson in SCHEDULE})
-    keyboard = [[InlineKeyboardButton(subj, callback_data=subj)] for subj in subjects]
+    keyboard = [[InlineKeyboardButton(subj, callback_data=f"hw:{subj}")] for subj in subjects]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("📘 Оберіть предмет для додавання ДЗ:", reply_markup=reply_markup)
+    await update.message.reply_text("📘 Обери предмет для ДЗ:", reply_markup=reply_markup)
 
 
 async def homework_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    subject = query.data
-    context.user_data["selected_subject"] = subject
-    await query.edit_message_text(f"Введіть ДЗ для предмета: {subject}")
+    data = query.data
+
+    if data.startswith("hw:"):
+        subject = data[3:]
+        context.user_data["selected_subject"] = subject
+        await query.edit_message_text(f"Введи ДЗ для: {subject}")
+    elif data.startswith("sched:"):
+        _, mode = data.split(":", 1)
+        fake_update = Update(
+            update.update_id,
+            message=query.message  # невеликий хак: викликаємо ті ж функції
+        )
+        if mode == "today":
+            await today_command(fake_update, context)
+        elif mode == "tomorrow":
+            await tomorrow_command(fake_update, context)
+        elif mode == "week":
+            await week_command(fake_update, context)
 
 
 async def save_homework_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     subject = context.user_data.get("selected_subject")
     if not subject:
-        await update.message.reply_text("Спочатку оберіть предмет через /homework.")
+        await update.message.reply_text("Спочатку обери предмет через «📚 ДЗ».")
         return
 
     homework_text = update.message.text
     HOMEWORK[subject] = homework_text
     save_homework()
-    await update.message.reply_text(f"✅ ДЗ для '{subject}' збережено: {homework_text}")
+    context.user_data["selected_subject"] = None
+    await update.message.reply_text(f"✅ ДЗ для «{subject}» збережено.", reply_markup=build_main_keyboard())
 
 
 async def list_homework(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -200,18 +214,22 @@ async def list_homework(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("ДЗ ще не додано.")
         return
 
-    text = "📋 Ваші ДЗ:\n" + "\n".join([f"📌 {subject}: {hw}" for subject, hw in HOMEWORK.items()])
+    text = "📋 Твої ДЗ:\n" + "\n".join([f"• {subject}: {hw}" for subject, hw in HOMEWORK.items()])
     await update.message.reply_text(text)
 
 
-async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def schedule_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
-        [KeyboardButton("🚀 /start"), KeyboardButton("🛑 /stop")],
-        [KeyboardButton("📚 /homework"), KeyboardButton("📝 /listhw")],
-        [KeyboardButton("🔙 /menu")],
+        [
+            InlineKeyboardButton("📅 Сьогодні", callback_data="sched:today"),
+            InlineKeyboardButton("📆 Завтра", callback_data="sched:tomorrow"),
+        ],
+        [InlineKeyboardButton("🗓 Тиждень", callback_data="sched:week")],
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-    await update.message.reply_text("🔧 Панель керування:", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "Обери, який розклад показати:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
 
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -223,7 +241,7 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     text = "📅 <b>Розклад на сьогодні:</b>\n" + "\n".join(
-        [f"🕒 {lesson['time']} | {lesson['subject']} | ауд. {lesson['room']}" for lesson in lessons]
+        [f"🕒 {l['time']} | {l['subject']} | ауд. {l['room']}" for l in lessons]
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -237,7 +255,7 @@ async def tomorrow_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     text = "📅 <b>Розклад на завтра:</b>\n" + "\n".join(
-        [f"🕒 {lesson['time']} | {lesson['subject']} | ауд. {lesson['room']}" for lesson in lessons]
+        [f"🕒 {l['time']} | {l['subject']} | ауд. {l['room']}" for l in lessons]
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -247,15 +265,32 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     for weekday_index, weekday_name in enumerate(WEEKDAY_TO_INDEX.keys()):
         lessons = get_lessons_for_day(weekday_index)
         if lessons:
-            text += "\n<b>{}:</b>\n".format(weekday_name) + "\n".join(
-                [f"🕒 {lesson['time']} | {lesson['subject']} | ауд. {lesson['room']}" for lesson in lessons]
+            text += f"\n<b>{weekday_name}:</b>\n" + "\n".join(
+                [f"🕒 {l['time']} | {l['subject']} | ауд. {l['room']}" for l in lessons]
             ) + "\n"
     await update.message.reply_text(text, parse_mode="HTML")
 
 
-def main() -> None:
-    from telegram.ext import MessageHandler, filters
+async def main_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = update.message.text.strip()
 
+    if text == "▶️ Старт":
+        await start_command(update, context)
+    elif text == "⏹ Стоп":
+        await stop_command(update, context)
+    elif text == "📚 ДЗ":
+        await homework_menu(update, context)
+    elif text == "📝 Список ДЗ":
+        await list_homework(update, context)
+    elif text == "📅 Розклад":
+        await schedule_menu(update, context)
+    elif text == "⚙️ Нагадування":
+        await update.message.reply_text("Використовуй команду: /remind 5")
+    else:
+        await save_homework_command(update, context)
+
+
+def main() -> None:
     app: Application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -266,13 +301,13 @@ def main() -> None:
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("homework", homework_menu))
     app.add_handler(CommandHandler("listhw", list_homework))
-    app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("tomorrow", tomorrow_command))
     app.add_handler(CommandHandler("week", week_command))
     app.add_handler(CommandHandler("remind", remind_command))
+
     app.add_handler(CallbackQueryHandler(homework_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_homework_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_router))
 
     load_homework()
     logger.info("Бот запущено")
