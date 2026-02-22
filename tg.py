@@ -1,3 +1,4 @@
+print("=== TG.PY STARTED ===")
 import asyncio
 from datetime import datetime, time, timedelta
 import os  # Додано для роботи зі змінними середовища
