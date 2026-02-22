@@ -16,6 +16,8 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 from schedule import SCHEDULE, WEEKDAY_TO_INDEX, get_lessons_for_day
@@ -277,8 +279,6 @@ async def main_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 def main() -> None:
-    from telegram.ext import MessageHandler, filters
-
     app: Application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
