@@ -1,6 +1,6 @@
 
 SCHEDULE = [
-    # Понеділок
+
     {
         "weekday": "Monday",
         "time": "08:15",
