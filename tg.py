@@ -37,7 +37,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REMINDER_INTERVAL = 15
+REMINDER_INTERVAL = 1
+
 
 MAIN_MENU_BUTTONS = [
     ["▶️ Старт", "⏹ Стоп"],
