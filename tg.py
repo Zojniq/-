@@ -37,7 +37,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REMINDER_INTERVAL = 4
+REMINDER_INTERVAL = 4           # хвилини до пари
+CHECK_INTERVAL = 60             # секунд між тиками тикера
 
 MAIN_MENU_BUTTONS = [
     ["▶️ Старт", "⏹ Стоп"],
@@ -79,8 +80,7 @@ async def reminder_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     room = data["room"]
     interval = data.get("interval", REMINDER_INTERVAL)
 
-    logger.info(f"REMINDER FIRED: {subject} {room}, interval={interval}")
-
+    logger.info(f"REMINDER FIRED (run_daily): {subject} {room}, interval={interval}")
     text = f"Час йти в універ! Через {interval} хв починається {subject} в кабінеті {room}."
     await context.bot.send_message(chat_id=chat_id, text=text)
 
@@ -99,6 +99,10 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
+    """
+    Залишаю run_daily як second-source. Основна логіка нагадувань – у tick_job.
+    Якщо run_daily на Railway не стріляє – все одно буде працювати через тикер.
+    """
     job_queue = application.job_queue
 
     if job_queue is None:
@@ -121,7 +125,7 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
 
         lesson_time = parse_time_str(lesson_time_str)
 
-        # локальний сьогоднішній день
+        # локальний сьогоднішній день (тільки для отримання tzinfo+часу)
         now = datetime.now(LOCAL_TZ)
         lesson_dt = datetime(
             year=now.year,
@@ -356,6 +360,50 @@ async def main_menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await save_homework_command(update, context)
 
 
+async def tick_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Глобальний тикер: раз на хвилину перевіряє, чи настав час нагадування
+    для поточного дня/пар, і шле повідомлення.
+    """
+    global MY_CHAT_ID
+    if MY_CHAT_ID is None:
+        return
+
+    now = datetime.now(LOCAL_TZ)
+    today_index = now.weekday()
+    current_time = now.time().replace(second=0, microsecond=0)
+
+    for lesson in SCHEDULE:
+        weekday_name = lesson["weekday"]
+        lesson_time_str = lesson["time"]
+        subject = lesson["subject"]
+        room = lesson["room"]
+
+        weekday_index = WEEKDAY_TO_INDEX.get(weekday_name)
+        if weekday_index is None or weekday_index != today_index:
+            continue
+
+        lesson_time = parse_time_str(lesson_time_str)
+
+        lesson_dt = datetime(
+            year=now.year,
+            month=now.month,
+            day=now.day,
+            hour=lesson_time.hour,
+            minute=lesson_time.minute,
+            tzinfo=LOCAL_TZ,
+        )
+        reminder_dt = lesson_dt - timedelta(minutes=REMINDER_INTERVAL)
+        reminder_time = reminder_dt.timetz().replace(second=0, microsecond=0)
+
+        if current_time == reminder_time:
+            logger.info(f"TICK REMINDER: {subject} {room}, interval={REMINDER_INTERVAL}")
+            await context.bot.send_message(
+                chat_id=MY_CHAT_ID,
+                text=f"Час йти в універ! Через {REMINDER_INTERVAL} хв починається {subject} в кабінеті {room}.",
+            )
+
+
 def main() -> None:
     app: Application = (
         ApplicationBuilder()
@@ -372,10 +420,18 @@ def main() -> None:
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("tomorrow", tomorrow_command))
     app.add_handler(CommandHandler("week", week_command))
-    # Якщо /remind вже не потрібен, лишаєш закоментованим
+    # Якщо /remind вже не потрібен, можна лишити закоментованим
     # app.add_handler(CommandHandler("remind", remind_command))
     app.add_handler(CallbackQueryHandler(homework_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_router))
+
+    # глобальний тикер раз на хвилину
+    app.job_queue.run_repeating(
+        tick_job,
+        interval=CHECK_INTERVAL,
+        first=0,
+        name="tick_job",
+    )
 
     load_homework()
     logger.info("Бот запущено")
