@@ -37,7 +37,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REMINDER_INTERVAL = 5
+REMINDER_INTERVAL = 4
 
 
 MAIN_MENU_BUTTONS = [
@@ -78,6 +78,8 @@ async def reminder_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     subject = data["subject"]
     room = data["room"]
     interval = data.get("interval", REMINDER_INTERVAL)
+
+    logger.info(f"REMINDER FIRED: {subject} {room}, interval={interval}")
 
     text = f"Час йти в універ! Через {interval} хв починається {subject} в кабінеті {room}."
     await context.bot.send_message(chat_id=chat_id, text=text)
