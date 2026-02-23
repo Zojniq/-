@@ -19,11 +19,11 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     filters,
+    Defaults,
 )
 
 from schedule import SCHEDULE, WEEKDAY_TO_INDEX, get_lessons_for_day
 from homework import HOMEWORK, load_homework, save_homework
-
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 
 REMINDER_INTERVAL = 4
 
-
 MAIN_MENU_BUTTONS = [
     ["▶️ Старт", "⏹ Стоп"],
     ["📚 ДЗ", "📝 Список ДЗ"],
@@ -47,6 +46,7 @@ MAIN_MENU_BUTTONS = [
 ]
 
 LOCAL_TZ = pytz.timezone("Europe/Bratislava")
+
 
 def build_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -115,6 +115,10 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
             continue
 
         weekday_index = WEEKDAY_TO_INDEX[weekday_name]
+        if weekday_index < 0 or weekday_index > 6:
+            logger.error(f"Некоректний індекс дня тижня: {weekday_index}")
+            continue
+
         lesson_time = parse_time_str(lesson_time_str)
 
         # локальний сьогоднішній день
@@ -139,7 +143,7 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
         job_queue.run_daily(
             callback=reminder_callback,
             time=reminder_time,
-            days=(weekday_index,),
+            days=(weekday_index,),  # 0=Monday ... 6=Sunday
             data={
                 "chat_id": chat_id,
                 "subject": subject,
@@ -356,6 +360,7 @@ def main() -> None:
     app: Application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
+        .defaults(Defaults(tzinfo=LOCAL_TZ))
         .build()
     )
 
@@ -367,7 +372,7 @@ def main() -> None:
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("tomorrow", tomorrow_command))
     app.add_handler(CommandHandler("week", week_command))
-    # Remove the remind command handler if no longer needed
+    # Якщо /remind вже не потрібен, лишаєш закоментованим
     # app.add_handler(CommandHandler("remind", remind_command))
     app.add_handler(CallbackQueryHandler(homework_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_router))
