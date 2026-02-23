@@ -1,3 +1,4 @@
+
 SCHEDULE = [
     {
         "weekday": "Monday",
@@ -9,12 +10,6 @@ SCHEDULE = [
         "weekday": "Monday",
         "time": "17:45",
         "subject": "Графові алгоритми",
-        "room": "313",
-    },
-    {
-        "weekday": "Monday",
-        "time": "14:15",  # ТЕСТОВА ПАРА
-        "subject": "TEST",
         "room": "313",
     },
     {
