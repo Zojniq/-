@@ -37,7 +37,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REMINDER_INTERVAL = 1
+REMINDER_INTERVAL = 4
 
 
 MAIN_MENU_BUTTONS = [
