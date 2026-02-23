@@ -77,8 +77,9 @@ async def reminder_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = data["chat_id"]
     subject = data["subject"]
     room = data["room"]
+    interval = data.get("interval", REMINDER_INTERVAL)
 
-    text = f"Час йти в універ! Через {REMINDER_INTERVAL} хв починається {subject} в кабінеті {room}."
+    text = f"Час йти в універ! Через {interval} хв починається {subject} в кабінеті {room}."
     await context.bot.send_message(chat_id=chat_id, text=text)
 
 
@@ -137,7 +138,12 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
             callback=reminder_callback,
             time=reminder_time,
             days=(weekday_index,),
-            data={"chat_id": chat_id, "subject": subject, "room": room},
+            data={
+                "chat_id": chat_id,
+                "subject": subject,
+                "room": room,
+                "interval": REMINDER_INTERVAL,
+            },
             name=job_name,
         )
 
@@ -182,7 +188,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     chat_id = update.effective_chat.id
 
-    if MY_CHAT_ID is not None and chat_id != MY_CHAT_ID:
+    if (MY_CHAT_ID is not None and chat_id != MY_CHAT_ID):
         await update.message.reply_text("У тебе немає активних нагадувань або ти не головний користувач бота.")
         return
 
