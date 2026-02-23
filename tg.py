@@ -347,7 +347,6 @@ def main() -> None:
     app: Application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .timezone(LOCAL_TZ)
         .build()
     )
 
