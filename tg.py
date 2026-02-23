@@ -1,3 +1,4 @@
+
 print("=== TG.PY STARTED ===")
 from datetime import datetime, time, timedelta
 import os
@@ -100,8 +101,7 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
     """
-    Залишаю run_daily як second-source. Основна логіка нагадувань – у tick_job.
-    Якщо run_daily на Railway не стріляє – все одно буде працювати через тикер.
+    run_daily як резерв. Основна логіка нагадувань – у tick_job.
     """
     job_queue = application.job_queue
 
