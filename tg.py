@@ -1,4 +1,3 @@
-
 print("=== TG.PY STARTED ===")
 from datetime import datetime, time, timedelta
 import os
@@ -411,6 +410,10 @@ def main() -> None:
         .defaults(Defaults(tzinfo=LOCAL_TZ))
         .build()
     )
+
+    # повністю прибираємо всі старі jobs із job_store,
+    # щоб не було "застряглих" понеділкових математик тощо
+    app.job_queue.scheduler.remove_all_jobs()  # [web:94]
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("stop", stop_command))
