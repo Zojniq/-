@@ -13,7 +13,7 @@ SCHEDULE = [
     },
     {
         "weekday": "Monday",
-        "time": "13:40",  # ТЕСТОВА ПАРА
+        "time": "13:55",  # ТЕСТОВА ПАРА
         "subject": "TEST",
         "room": "313",
     },
