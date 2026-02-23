@@ -2,6 +2,7 @@ print("=== TG.PY STARTED ===")
 from datetime import datetime, time, timedelta
 import os
 import logging
+import pytz
 
 from telegram import (
     Update,
@@ -43,6 +44,8 @@ MAIN_MENU_BUTTONS = [
     ["📚 ДЗ", "📝 Список ДЗ"],
     ["📅 Розклад", "⚙️ Нагадування"],
 ]
+
+LOCAL_TZ = pytz.timezone("Europe/Bratislava")
 
 def build_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -94,6 +97,10 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
     job_queue = application.job_queue
 
+    if job_queue is None:
+        logger.error("JobQueue не налаштований")
+        return
+
     for i, lesson in enumerate(SCHEDULE):
         weekday_name = lesson["weekday"]
         lesson_time_str = lesson["time"]
@@ -106,8 +113,22 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
         weekday_index = WEEKDAY_TO_INDEX[weekday_name]
         lesson_time = parse_time_str(lesson_time_str)
 
-        dt_dummy = datetime.combine(datetime.today(), lesson_time) - timedelta(minutes=REMINDER_INTERVAL)
-        reminder_time = time(hour=dt_dummy.hour, minute=dt_dummy.minute)
+        # локальний сьогоднішній день
+        now = datetime.now(LOCAL_TZ)
+        lesson_dt = datetime(
+            year=now.year,
+            month=now.month,
+            day=now.day,
+            hour=lesson_time.hour,
+            minute=lesson_time.minute,
+            tzinfo=LOCAL_TZ,
+        )
+        dt_dummy = lesson_dt - timedelta(minutes=REMINDER_INTERVAL)
+        reminder_time = dt_dummy.timetz()  # time з tzinfo
+
+        logger.info(
+            f"Job added: {weekday_name} {lesson_time_str}, reminder at {reminder_time}"
+        )
 
         job_name = f"reminder_{chat_id}_{weekday_index}_{i}"
 
@@ -115,11 +136,7 @@ def schedule_jobs_for_chat(application: Application, chat_id: int) -> None:
             callback=reminder_callback,
             time=reminder_time,
             days=(weekday_index,),
-            data={
-                "chat_id": chat_id,
-                "subject": subject,
-                "room": room,
-            },
+            data={"chat_id": chat_id, "subject": subject, "room": room},
             name=job_name,
         )
 
@@ -259,7 +276,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    today_index = datetime.today().weekday()
+    today_index = datetime.now(LOCAL_TZ).weekday()
     lessons = get_lessons_for_day(today_index)
 
     if not lessons:
@@ -273,7 +290,7 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def tomorrow_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    tomorrow_index = (datetime.today().weekday() + 1) % 7
+    tomorrow_index = (datetime.now(LOCAL_TZ).weekday() + 1) % 7
     lessons = get_lessons_for_day(tomorrow_index)
 
     if not lessons:
@@ -330,6 +347,7 @@ def main() -> None:
     app: Application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
+        .timezone(LOCAL_TZ)
         .build()
     )
 
